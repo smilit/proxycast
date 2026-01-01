@@ -638,7 +638,15 @@ pub async fn models() -> impl IntoResponse {
             {"id": "gemini-3-pro-preview", "object": "model", "owned_by": "google"},
             // Qwen models
             {"id": "qwen3-coder-plus", "object": "model", "owned_by": "alibaba"},
-            {"id": "qwen3-coder-flash", "object": "model", "owned_by": "alibaba"}
+            {"id": "qwen3-coder-flash", "object": "model", "owned_by": "alibaba"},
+            // Antigravity models
+            {"id": "gemini-3-pro-preview", "object": "model", "owned_by": "antigravity"},
+            {"id": "gemini-3-pro-image-preview", "object": "model", "owned_by": "antigravity"},
+            {"id": "gemini-3-flash-preview", "object": "model", "owned_by": "antigravity"},
+            {"id": "gemini-2.5-computer-use-preview-10-2025", "object": "model", "owned_by": "antigravity"},
+            {"id": "gemini-claude-sonnet-4-5", "object": "model", "owned_by": "antigravity"},
+            {"id": "gemini-claude-sonnet-4-5-thinking", "object": "model", "owned_by": "antigravity"},
+            {"id": "gemini-claude-opus-4-5-thinking", "object": "model", "owned_by": "antigravity"}
         ]
     }))
 }
