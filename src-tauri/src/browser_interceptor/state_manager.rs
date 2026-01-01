@@ -224,7 +224,8 @@ impl StateManager {
     async fn get_default_browser(&self) -> Result<Option<String>> {
         #[cfg(target_os = "windows")]
         {
-            self.get_default_browser_windows().await
+            // Windows: 从注册表读取默认浏览器
+            Ok(None) // TODO: 实现 Windows 默认浏览器检测
         }
 
         #[cfg(target_os = "macos")]
@@ -295,7 +296,7 @@ async fn backup_registry_keys(
 
             if result.is_ok() {
                 let mut buffer = vec![0u16; 1024];
-                let mut buffer_size = buffer.len() * 2;
+                let buffer_size = buffer.len() * 2;
 
                 let mut buffer_size_u32 = buffer_size as u32;
                 let result = RegQueryValueExW(
