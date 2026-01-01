@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            name: macOS-arm64
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            name: macOS-x64
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: Windows-x64
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: Linux-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: "rust-${{ matrix.target }}"
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+        with:
+          tagName: ${{ github.event.inputs.version || github.ref_name }}
+          releaseName: 'ProxyCast ${{ github.event.inputs.version || github.ref_name }}'
+          releaseBody: |
+            ## ProxyCast Release
+
+            ### Features
+            - AI API 代理服务
+            - Kiro OAuth 凭证管理
+            - OpenAI/Anthropic 兼容 API
+            - 自动检测凭证文件变化
+            - 多 Provider 支持
+
+            ### Downloads
+            - **macOS (Apple Silicon)**: `proxycast_*_aarch64.dmg`
+            - **macOS (Intel)**: `proxycast_*_x64.dmg`
+            - **Windows (64-bit)**: `proxycast_*_x64-setup.exe`
+            - **Linux x64**: `proxycast_*_amd64.deb` / `proxycast_*_amd64.AppImage`
+
+            ### macOS 首次安装
+
+            由于应用未经 Apple 签名，首次打开可能提示「应用已损坏」，请运行：
+            ```bash
+            xattr -cr /Applications/proxycast.app
+            ```
+
+            ### 默认配置
+            - **端口**: 8999
+            - **API Key**: 首次启动自动生成，可在设置页查看/修改
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}

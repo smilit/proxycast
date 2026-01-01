@@ -1,0 +1,107 @@
+[package]
+name = "proxycast"
+version = "0.27.0"
+description = "AI API Proxy Desktop App"
+authors = ["you"]
+edition = "2021"
+repository = "https://github.com/aiclientproxy/proxycast"
+homepage = "https://github.com/aiclientproxy/proxycast"
+
+[lib]
+name = "proxycast_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["ws"] }
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls-pemfile = "2"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["limit"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+futures = "0.3"
+async-stream = "0.3"
+regex = "1"
+md5 = "0.7"
+urlencoding = "2"
+subtle = "2.5"
+flate2 = "1"
+tar = "0.4"
+fs2 = "0.4"
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+serde_yaml = "0.9"
+indexmap = { version = "2", features = ["serde"] }
+zip = "0.6"
+anyhow = "1"
+dashmap = "5"
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+parking_lot = "0.12"
+tiktoken-rs = "0.6"
+async-trait = "0.1"
+thiserror = "1"
+base64 = "0.22"
+bytes = "1"
+rand = "0.8"
+sha2 = "0.10"
+serde_urlencoded = "0.7"
+open = "5"
+url = "2"
+once_cell = "1"
+tokio-util = "0.7"
+arboard = "3"
+
+# Platform specific dependencies for browser interceptor
+
+# Windows specific dependencies for browser interceptor and machine ID management
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.56", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Security",
+] }
+winapi = { version = "0.3", features = [
+    "winuser",
+    "winreg",
+    "processthreadsapi",
+    "handleapi",
+    "shellapi",
+    "psapi",
+    "tlhelp32",
+] }
+winreg = "0.52"
+
+# macOS specific dependencies for browser interceptor
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"
+objc = "0.2"
+tauri-plugin-deep-link = "2"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

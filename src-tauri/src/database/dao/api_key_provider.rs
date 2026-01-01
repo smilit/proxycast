@@ -1,0 +1,609 @@
+//! API Key Provider 数据访问对象
+//!
+//! 提供 API Key Provider 的 CRUD 操作。
+//!
+//! **Feature: provider-ui-refactor**
+//! **Validates: Requirements 9.1**
+
+use chrono::{DateTime, Utc};
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// 数据模型
+// ============================================================================
+
+/// Provider API 类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApiProviderType {
+    Openai,
+    OpenaiResponse,
+    Anthropic,
+    Gemini,
+    AzureOpenai,
+    Vertexai,
+    AwsBedrock,
+    Ollama,
+    NewApi,
+    Gateway,
+}
+
+impl std::fmt::Display for ApiProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiProviderType::Openai => write!(f, "openai"),
+            ApiProviderType::OpenaiResponse => write!(f, "openai-response"),
+            ApiProviderType::Anthropic => write!(f, "anthropic"),
+            ApiProviderType::Gemini => write!(f, "gemini"),
+            ApiProviderType::AzureOpenai => write!(f, "azure-openai"),
+            ApiProviderType::Vertexai => write!(f, "vertexai"),
+            ApiProviderType::AwsBedrock => write!(f, "aws-bedrock"),
+            ApiProviderType::Ollama => write!(f, "ollama"),
+            ApiProviderType::NewApi => write!(f, "new-api"),
+            ApiProviderType::Gateway => write!(f, "gateway"),
+        }
+    }
+}
+
+impl std::str::FromStr for ApiProviderType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "openai" => Ok(ApiProviderType::Openai),
+            "openai-response" => Ok(ApiProviderType::OpenaiResponse),
+            "anthropic" => Ok(ApiProviderType::Anthropic),
+            "gemini" => Ok(ApiProviderType::Gemini),
+            "azure-openai" => Ok(ApiProviderType::AzureOpenai),
+            "vertexai" => Ok(ApiProviderType::Vertexai),
+            "aws-bedrock" => Ok(ApiProviderType::AwsBedrock),
+            "ollama" => Ok(ApiProviderType::Ollama),
+            "new-api" => Ok(ApiProviderType::NewApi),
+            "gateway" => Ok(ApiProviderType::Gateway),
+            _ => Err(format!("Invalid provider type: {}", s)),
+        }
+    }
+}
+
+/// Provider 分组类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderGroup {
+    Mainstream,
+    Chinese,
+    Cloud,
+    Aggregator,
+    Local,
+    Specialized,
+    Custom,
+}
+
+impl std::fmt::Display for ProviderGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProviderGroup::Mainstream => write!(f, "mainstream"),
+            ProviderGroup::Chinese => write!(f, "chinese"),
+            ProviderGroup::Cloud => write!(f, "cloud"),
+            ProviderGroup::Aggregator => write!(f, "aggregator"),
+            ProviderGroup::Local => write!(f, "local"),
+            ProviderGroup::Specialized => write!(f, "specialized"),
+            ProviderGroup::Custom => write!(f, "custom"),
+        }
+    }
+}
+
+impl std::str::FromStr for ProviderGroup {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "mainstream" => Ok(ProviderGroup::Mainstream),
+            "chinese" => Ok(ProviderGroup::Chinese),
+            "cloud" => Ok(ProviderGroup::Cloud),
+            "aggregator" => Ok(ProviderGroup::Aggregator),
+            "local" => Ok(ProviderGroup::Local),
+            "specialized" => Ok(ProviderGroup::Specialized),
+            "custom" => Ok(ProviderGroup::Custom),
+            _ => Err(format!("Invalid provider group: {}", s)),
+        }
+    }
+}
+
+/// API Key Provider 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyProvider {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub provider_type: ApiProviderType,
+    pub api_host: String,
+    pub is_system: bool,
+    pub group: ProviderGroup,
+    pub enabled: bool,
+    pub sort_order: i32,
+    pub api_version: Option<String>,
+    pub project: Option<String>,
+    pub location: Option<String>,
+    pub region: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// API Key 条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyEntry {
+    pub id: String,
+    pub provider_id: String,
+    /// 加密后的 API Key
+    pub api_key_encrypted: String,
+    pub alias: Option<String>,
+    pub enabled: bool,
+    pub usage_count: i64,
+    pub error_count: i64,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Provider 完整数据（包含 API Keys）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderWithKeys {
+    #[serde(flatten)]
+    pub provider: ApiKeyProvider,
+    pub api_keys: Vec<ApiKeyEntry>,
+}
+
+// ============================================================================
+// DAO 实现
+// ============================================================================
+
+pub struct ApiKeyProviderDao;
+
+impl ApiKeyProviderDao {
+    // ==================== Provider 操作 ====================
+
+    /// 获取所有 Provider
+    pub fn get_all_providers(conn: &Connection) -> Result<Vec<ApiKeyProvider>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, type, api_host, is_system, group_name, enabled, sort_order,
+                    api_version, project, location, region, created_at, updated_at
+             FROM api_key_providers
+             ORDER BY sort_order ASC, created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([], Self::row_to_provider)?;
+        let mut providers = Vec::new();
+        for provider in rows.flatten() {
+            providers.push(provider);
+        }
+        Ok(providers)
+    }
+
+    /// 根据 ID 获取 Provider
+    pub fn get_provider_by_id(
+        conn: &Connection,
+        id: &str,
+    ) -> Result<Option<ApiKeyProvider>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, type, api_host, is_system, group_name, enabled, sort_order,
+                    api_version, project, location, region, created_at, updated_at
+             FROM api_key_providers
+             WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query([id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::row_to_provider(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// 根据分组获取 Provider
+    pub fn get_providers_by_group(
+        conn: &Connection,
+        group: ProviderGroup,
+    ) -> Result<Vec<ApiKeyProvider>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, type, api_host, is_system, group_name, enabled, sort_order,
+                    api_version, project, location, region, created_at, updated_at
+             FROM api_key_providers
+             WHERE group_name = ?1
+             ORDER BY sort_order ASC, created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([group.to_string()], Self::row_to_provider)?;
+        let mut providers = Vec::new();
+        for provider in rows.flatten() {
+            providers.push(provider);
+        }
+        Ok(providers)
+    }
+
+    /// 插入新 Provider
+    pub fn insert_provider(
+        conn: &Connection,
+        provider: &ApiKeyProvider,
+    ) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "INSERT INTO api_key_providers
+             (id, name, type, api_host, is_system, group_name, enabled, sort_order,
+              api_version, project, location, region, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                provider.id,
+                provider.name,
+                provider.provider_type.to_string(),
+                provider.api_host,
+                provider.is_system,
+                provider.group.to_string(),
+                provider.enabled,
+                provider.sort_order,
+                provider.api_version,
+                provider.project,
+                provider.location,
+                provider.region,
+                provider.created_at.to_rfc3339(),
+                provider.updated_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 更新 Provider
+    pub fn update_provider(
+        conn: &Connection,
+        provider: &ApiKeyProvider,
+    ) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "UPDATE api_key_providers SET
+             name = ?2, type = ?3, api_host = ?4, is_system = ?5, group_name = ?6,
+             enabled = ?7, sort_order = ?8, api_version = ?9, project = ?10,
+             location = ?11, region = ?12, updated_at = ?13
+             WHERE id = ?1",
+            params![
+                provider.id,
+                provider.name,
+                provider.provider_type.to_string(),
+                provider.api_host,
+                provider.is_system,
+                provider.group.to_string(),
+                provider.enabled,
+                provider.sort_order,
+                provider.api_version,
+                provider.project,
+                provider.location,
+                provider.region,
+                provider.updated_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 删除 Provider（仅限自定义 Provider）
+    pub fn delete_provider(conn: &Connection, id: &str) -> Result<bool, rusqlite::Error> {
+        // 先检查是否为系统 Provider
+        let is_system: bool = conn.query_row(
+            "SELECT is_system FROM api_key_providers WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+
+        if is_system {
+            return Ok(false); // 不允许删除系统 Provider
+        }
+
+        let affected = conn.execute("DELETE FROM api_key_providers WHERE id = ?1", [id])?;
+        Ok(affected > 0)
+    }
+
+    /// 从数据库行转换为 ApiKeyProvider
+    fn row_to_provider(row: &rusqlite::Row) -> Result<ApiKeyProvider, rusqlite::Error> {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let type_str: String = row.get(2)?;
+        let api_host: String = row.get(3)?;
+        let is_system: bool = row.get(4)?;
+        let group_str: String = row.get(5)?;
+        let enabled: bool = row.get(6)?;
+        let sort_order: i32 = row.get(7)?;
+        let api_version: Option<String> = row.get(8)?;
+        let project: Option<String> = row.get(9)?;
+        let location: Option<String> = row.get(10)?;
+        let region: Option<String> = row.get(11)?;
+        let created_at_str: String = row.get(12)?;
+        let updated_at_str: String = row.get(13)?;
+
+        let provider_type: ApiProviderType = type_str.parse().unwrap_or(ApiProviderType::Openai);
+        let group: ProviderGroup = group_str.parse().unwrap_or(ProviderGroup::Custom);
+
+        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        Ok(ApiKeyProvider {
+            id,
+            name,
+            provider_type,
+            api_host,
+            is_system,
+            group,
+            enabled,
+            sort_order,
+            api_version,
+            project,
+            location,
+            region,
+            created_at,
+            updated_at,
+        })
+    }
+
+    // ==================== API Key 操作 ====================
+
+    /// 获取 Provider 的所有 API Keys
+    pub fn get_api_keys_by_provider(
+        conn: &Connection,
+        provider_id: &str,
+    ) -> Result<Vec<ApiKeyEntry>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, provider_id, api_key_encrypted, alias, enabled,
+                    usage_count, error_count, last_used_at, created_at
+             FROM api_keys
+             WHERE provider_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([provider_id], Self::row_to_api_key)?;
+        let mut keys = Vec::new();
+        for key in rows.flatten() {
+            keys.push(key);
+        }
+        Ok(keys)
+    }
+
+    /// 获取所有启用的 API Keys
+    pub fn get_enabled_api_keys_by_provider(
+        conn: &Connection,
+        provider_id: &str,
+    ) -> Result<Vec<ApiKeyEntry>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, provider_id, api_key_encrypted, alias, enabled,
+                    usage_count, error_count, last_used_at, created_at
+             FROM api_keys
+             WHERE provider_id = ?1 AND enabled = 1
+             ORDER BY created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([provider_id], Self::row_to_api_key)?;
+        let mut keys = Vec::new();
+        for key in rows.flatten() {
+            keys.push(key);
+        }
+        Ok(keys)
+    }
+
+    /// 根据 ID 获取 API Key
+    pub fn get_api_key_by_id(
+        conn: &Connection,
+        id: &str,
+    ) -> Result<Option<ApiKeyEntry>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, provider_id, api_key_encrypted, alias, enabled,
+                    usage_count, error_count, last_used_at, created_at
+             FROM api_keys
+             WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query([id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::row_to_api_key(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// 插入新 API Key
+    pub fn insert_api_key(conn: &Connection, key: &ApiKeyEntry) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "INSERT INTO api_keys
+             (id, provider_id, api_key_encrypted, alias, enabled,
+              usage_count, error_count, last_used_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                key.id,
+                key.provider_id,
+                key.api_key_encrypted,
+                key.alias,
+                key.enabled,
+                key.usage_count,
+                key.error_count,
+                key.last_used_at.map(|t| t.to_rfc3339()),
+                key.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 更新 API Key
+    pub fn update_api_key(conn: &Connection, key: &ApiKeyEntry) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "UPDATE api_keys SET
+             alias = ?2, enabled = ?3, usage_count = ?4, error_count = ?5, last_used_at = ?6
+             WHERE id = ?1",
+            params![
+                key.id,
+                key.alias,
+                key.enabled,
+                key.usage_count,
+                key.error_count,
+                key.last_used_at.map(|t| t.to_rfc3339()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 删除 API Key
+    pub fn delete_api_key(conn: &Connection, id: &str) -> Result<bool, rusqlite::Error> {
+        let affected = conn.execute("DELETE FROM api_keys WHERE id = ?1", [id])?;
+        Ok(affected > 0)
+    }
+
+    /// 更新 API Key 使用统计
+    pub fn update_api_key_usage(
+        conn: &Connection,
+        id: &str,
+        usage_count: i64,
+        last_used_at: DateTime<Utc>,
+    ) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "UPDATE api_keys SET usage_count = ?2, last_used_at = ?3 WHERE id = ?1",
+            params![id, usage_count, last_used_at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// 增加 API Key 错误计数
+    pub fn increment_api_key_error(conn: &Connection, id: &str) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "UPDATE api_keys SET error_count = error_count + 1 WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    /// 从数据库行转换为 ApiKeyEntry
+    fn row_to_api_key(row: &rusqlite::Row) -> Result<ApiKeyEntry, rusqlite::Error> {
+        let id: String = row.get(0)?;
+        let provider_id: String = row.get(1)?;
+        let api_key_encrypted: String = row.get(2)?;
+        let alias: Option<String> = row.get(3)?;
+        let enabled: bool = row.get(4)?;
+        let usage_count: i64 = row.get(5)?;
+        let error_count: i64 = row.get(6)?;
+        let last_used_at_str: Option<String> = row.get(7)?;
+        let created_at_str: String = row.get(8)?;
+
+        let last_used_at = last_used_at_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        });
+        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        Ok(ApiKeyEntry {
+            id,
+            provider_id,
+            api_key_encrypted,
+            alias,
+            enabled,
+            usage_count,
+            error_count,
+            last_used_at,
+            created_at,
+        })
+    }
+
+    // ==================== UI 状态操作 ====================
+
+    /// 获取 UI 状态
+    pub fn get_ui_state(conn: &Connection, key: &str) -> Result<Option<String>, rusqlite::Error> {
+        let mut stmt = conn.prepare("SELECT value FROM provider_ui_state WHERE key = ?1")?;
+        let mut rows = stmt.query([key])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// 设置 UI 状态
+    pub fn set_ui_state(conn: &Connection, key: &str, value: &str) -> Result<(), rusqlite::Error> {
+        conn.execute(
+            "INSERT OR REPLACE INTO provider_ui_state (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// 删除 UI 状态
+    pub fn delete_ui_state(conn: &Connection, key: &str) -> Result<bool, rusqlite::Error> {
+        let affected = conn.execute("DELETE FROM provider_ui_state WHERE key = ?1", [key])?;
+        Ok(affected > 0)
+    }
+
+    // ==================== 复合查询 ====================
+
+    /// 获取所有 Provider 及其 API Keys
+    pub fn get_all_providers_with_keys(
+        conn: &Connection,
+    ) -> Result<Vec<ProviderWithKeys>, rusqlite::Error> {
+        let providers = Self::get_all_providers(conn)?;
+        let mut result = Vec::new();
+
+        for provider in providers {
+            let api_keys = Self::get_api_keys_by_provider(conn, &provider.id)?;
+            result.push(ProviderWithKeys { provider, api_keys });
+        }
+
+        Ok(result)
+    }
+
+    /// 获取启用的 Provider 及其启用的 API Keys
+    pub fn get_enabled_providers_with_keys(
+        conn: &Connection,
+    ) -> Result<Vec<ProviderWithKeys>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, type, api_host, is_system, group_name, enabled, sort_order,
+                    api_version, project, location, region, created_at, updated_at
+             FROM api_key_providers
+             WHERE enabled = 1
+             ORDER BY sort_order ASC, created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([], Self::row_to_provider)?;
+        let mut result = Vec::new();
+
+        for provider in rows.flatten() {
+            let api_keys = Self::get_enabled_api_keys_by_provider(conn, &provider.id)?;
+            if !api_keys.is_empty() {
+                result.push(ProviderWithKeys { provider, api_keys });
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// 统计 Provider 的 API Key 数量
+    pub fn count_api_keys_by_provider(
+        conn: &Connection,
+        provider_id: &str,
+    ) -> Result<i64, rusqlite::Error> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM api_keys WHERE provider_id = ?1",
+            [provider_id],
+            |row| row.get(0),
+        )
+    }
+
+    /// 批量更新 Provider 排序顺序
+    /// **Validates: Requirements 8.4**
+    pub fn update_provider_sort_orders(
+        conn: &Connection,
+        sort_orders: &[(String, i32)],
+    ) -> Result<(), rusqlite::Error> {
+        let now = chrono::Utc::now().to_rfc3339();
+        for (id, sort_order) in sort_orders {
+            conn.execute(
+                "UPDATE api_key_providers SET sort_order = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id, sort_order, now],
+            )?;
+        }
+        Ok(())
+    }
+}
