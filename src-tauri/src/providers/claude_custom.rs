@@ -20,10 +20,10 @@ pub struct ClaudeCustomProvider {
 impl Default for ClaudeCustomProvider {
     fn default() -> Self {
         // 创建带超时配置的 HTTP 客户端
-        // 参考 KiroProvider 的配置，避免流式传输中断
+        // 流式响应不设置总超时，只设置连接超时和读取超时
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30)) // 连接超时 30 秒
-            .timeout(std::time::Duration::from_secs(300)) // 总超时 5 分钟
+            .read_timeout(std::time::Duration::from_secs(60)) // 每次读取超时 60 秒
             .pool_idle_timeout(std::time::Duration::from_secs(90)) // 连接池空闲超时
             .tcp_keepalive(std::time::Duration::from_secs(60)) // TCP keep-alive
             .build()
@@ -44,9 +44,10 @@ impl ClaudeCustomProvider {
     /// 使用 API key 和 base_url 创建 Provider
     pub fn with_config(api_key: String, base_url: Option<String>) -> Self {
         // 创建带超时配置的 HTTP 客户端
+        // 流式响应不设置总超时，只设置连接超时和读取超时
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30)) // 连接超时 30 秒
-            .timeout(std::time::Duration::from_secs(300)) // 总超时 5 分钟
+            .read_timeout(std::time::Duration::from_secs(60)) // 每次读取超时 60 秒
             .pool_idle_timeout(std::time::Duration::from_secs(90)) // 连接池空闲超时
             .tcp_keepalive(std::time::Duration::from_secs(60)) // TCP keep-alive
             .build()
